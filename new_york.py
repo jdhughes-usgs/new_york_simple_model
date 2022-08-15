@@ -14,6 +14,7 @@ import shutil
 from distutils.dir_util import copy_tree
 from bmi.wrapper import BMIWrapper
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Initialize model dir
 modelname = "model"
@@ -33,10 +34,10 @@ network.mesh2d_create_rectilinear_within_extent(extent=(-5, -5, 5, 5), dx=1, dy=
 # Create bed level
 xyz_model = XYZModel(points=[])
 xyz_model.points = [
-    XYZPoint(x=-5.1, y=-5.1, z=-50.0),
-    XYZPoint(x=-5.1, y=5.1, z=-50.0),
-    XYZPoint(x=5.1, y=-5.1, z=-20.0),
-    XYZPoint(x=5.1, y=5.1, z=-20.0),
+    XYZPoint(x=-5.1, y=-5.1, z=-4.0),
+    XYZPoint(x=-5.1, y=5.1, z=-4.0),
+    XYZPoint(x=5.1, y=-5.1, z=+4.0),
+    XYZPoint(x=5.1, y=5.1, z=+4.0),
 ]
 xyz_model.save()
 bed_level = InitialField(
@@ -104,17 +105,24 @@ dflowfm = BMIWrapper(
 dflowfm.initialize()
 
 # Time loop
+
+plt.ion()
+fig, ax = plt.subplots()
+plt.show()
+
 index = 0
 while dflowfm.get_current_time() < dflowfm.get_end_time():
     dflowfm.update()
-    if index == 10:
+    if index%10 == 0:
         x = dflowfm.get_var("xz")
         y = dflowfm.get_var("yz")
         water_depth = dflowfm.get_var("hs")
-        fig, ax = plt.subplots()
-        sc = ax.scatter(x, y, c=water_depth)
-        fig.colorbar(sc)
-        plt.show()
+        levels = np.linspace(0.0, 5.0, 20)
+        sc = ax.tricontourf(x, y, water_depth, levels)
+        if (index == 0): 
+            plt.colorbar(sc)
+        plt.title(str(index))
+        plt.pause(0.2)
 
     index += 1
 
