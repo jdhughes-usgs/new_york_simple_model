@@ -1,0 +1,13 @@
+name: new_york
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - pip
+  - pip:
+      - matplotlib
+      - bmi-python
+      - pywin32
+      - git+https://github.com/Deltares/HYDROLIB-core.git
