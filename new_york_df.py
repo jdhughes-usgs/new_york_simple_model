@@ -10,7 +10,7 @@ from new_york_build_dflow import build_dflowfm, extent, dx, dy
 verbose = False
 modelname = "model"
 modelws = "model"
-build_dflowfm("model", modelname=modelname, clean=True)
+build_dflowfm(modelws, modelname=modelname, clean=True, verbose=verbose)
 
 # Add dflowfm dll folder to PATH so that it can be found by the BMIWrapper
 os.environ["PATH"] = (

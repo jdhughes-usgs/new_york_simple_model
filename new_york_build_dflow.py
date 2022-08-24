@@ -40,20 +40,20 @@ def generate_bed_level(z0=-5, dz=10.0, verbose=False):
 
 
 def build_dflowfm(
-    model_dir,
+    modelws,
     modelname="model",
     clean=False,
     verbose=False,
 ):
     # Initialize model dir
     if clean:
-        if Path(model_dir).exists():
-            shutil.rmtree(model_dir)
-        os.makedirs(model_dir)
+        if Path(modelws).exists():
+            shutil.rmtree(modelws)
+        os.makedirs(modelws)
     else:
-        os.makedirs(model_dir, exist_ok=True)
+        os.makedirs(modelws, exist_ok=True)
 
-    os.chdir(model_dir)
+    os.chdir(modelws)
 
     # Create new model object
     fm_model = FMModel()

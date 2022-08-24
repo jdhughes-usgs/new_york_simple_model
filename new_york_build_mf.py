@@ -1,13 +1,15 @@
 import os
+from pyexpat import model
 import shutil
 import numpy as np
 import flopy
+from pathlib import Path
 
 from new_york_build_dflow import dx, dy
 
 exe_dir = "mf6_dll"
-mfexe = os.path.join(exe_dir, "mf6.exe")
-mfapiexe = os.path.join(exe_dir, "libmf6.dll")
+mfexe = os.path.abspath(os.path.join(exe_dir, "mf6.exe"))
+mfapiexe = os.path.abspath(os.path.join(exe_dir, "libmf6.dll"))
 
 
 def const_to_2darray(nrow, ncol, v):
@@ -15,6 +17,68 @@ def const_to_2darray(nrow, ncol, v):
     if isinstance(v, float):
         v = np.full(shape2d, v, dtype=float)
     return v
+
+
+def get_dimensions():
+    return 2, 10, 11
+
+
+def get_shapes():
+    nlay, nrow, ncol = get_dimensions()
+    return (nrow, ncol), (nlay, nrow, ncol)
+
+
+def get_sizes():
+    nlay, nrow, ncol = get_dimensions()
+    return nrow * ncol, nlay * nrow * ncol
+
+
+def get_hydraulic_conductivity():
+    k = 1.0 / 86400.0
+    k33 = k / 10.0
+    return k, k33
+
+
+def get_layer0_thickness():
+    return 5.0
+
+
+def get_boundary_conductance():
+    _, k33 = get_hydraulic_conductivity()
+    bed_thickness = 0.5 * get_layer0_thickness()
+    return k33 * dx * dy / bed_thickness
+
+
+def get_recharge_rate():
+    return 2.0e-6
+
+
+def xy_from_xyz(xyz):
+    return [(x, y) for x, y, _ in xyz]
+
+
+def z_from_xyz(xyz):
+    return [z for _, _, z in xyz]
+
+
+def pack_xyv(xy, v):
+    return [(xx, yy, v[idx]) for idx, (xx, yy) in enumerate(xy)]
+
+
+def dflowfm_to_array(modelgrid, xy, v, two_dimensional=False):
+    if two_dimensional:
+        shape, _ = get_shapes()
+    else:
+        shape, _ = get_sizes()
+    arr = np.zeros(shape, dtype=float)
+    for idx, (x, y) in enumerate(xy):
+        i, j = modelgrid.intersect(x, y)
+        if two_dimensional:
+            loc = (i, j)
+        else:
+            loc = modelgrid.get_node([(0, i, j)])[0]
+        arr[loc] = v[idx]
+    return arr
 
 
 def rch_boundary(nrow, ncol, top, recharge_rate, head=0.0):
@@ -48,12 +112,120 @@ def ghb_boundary(nrow, ncol, top, cond, head=0.0):
     return stress_period_data
 
 
+def get_node_list(top, water_level, packagename):
+    nodes = top.shape[0]
+    node_list = []
+    elev = []
+    for node in range(nodes):
+        add_node = False
+        if "GHB" in packagename.upper():
+            if water_level[node] >= top[node]:
+                add_node = True
+        else:
+            if top[node] < water_level[node]:
+                add_node = True
+        if add_node:
+            node_list.append(node)
+            elev.append(water_level[node])
+    node_list = np.array(node_list, dtype=np.int32) + 1
+    elev = np.array(elev, dtype=float)
+    nbound = np.int32(node_list.shape[0])
+    return nbound, node_list, elev
+
+
+def update_nbound(modelname, mf6, packagename, nbound):
+    nbound_tag = mf6.get_var_address("NBOUND", modelname.upper(), packagename)
+    mf6.set_value(nbound_tag, np.array([nbound], dtype=np.int32))
+
+
+def get_nodelist_ptr(modelname, mf6, packagename):
+    nodelist_tag = mf6.get_var_address(
+        "NODELIST", modelname.upper(), packagename
+    )
+    return mf6.get_value_ptr(nodelist_tag)
+
+
+def get_bound_ptr(modelname, mf6, packagename):
+    bound_tag = mf6.get_var_address("BOUND", modelname.upper(), packagename)
+    return mf6.get_value_ptr(bound_tag)
+
+
+def _update_recharge(modelname, mf6, top, water_level):
+    packagename = "RCH_0"
+    nbound, node_list, _ = get_node_list(top, water_level, packagename)
+
+    update_nbound(modelname, mf6, packagename, nbound)
+
+    nodelist_array = get_nodelist_ptr(modelname, mf6, packagename)
+    nodelist_array[:nbound] = node_list
+
+    bound_array = get_bound_ptr(modelname, mf6, packagename)
+    bound_array[:nbound, 0] = np.full(
+        nbound,
+        get_recharge_rate(),
+        dtype=float,
+    )
+
+    return
+
+
+def _update_drain(modelname, mf6, top, water_level):
+    packagename = "DRN_0"
+    nbound, node_list, elev = get_node_list(top, water_level, packagename)
+
+    update_nbound(modelname, mf6, packagename, nbound)
+
+    nodelist_array = get_nodelist_ptr(modelname, mf6, packagename)
+    nodelist_array[:nbound] = node_list + 1
+
+    bound_array = get_bound_ptr(modelname, mf6, packagename)
+    bound_array[:nbound, 0] = elev[:]
+    bound_array[:nbound, 1] = np.full(
+        nbound,
+        get_boundary_conductance(),
+        dtype=float,
+    )
+
+    return
+
+
+def _update_ghb(modelname, mf6, top, water_level):
+    packagename = "GHB_0"
+    nbound, node_list, elev = get_node_list(top, water_level, packagename)
+
+    update_nbound(modelname, mf6, packagename, nbound)
+
+    nodelist_array = get_nodelist_ptr(modelname, mf6, packagename)
+    nodelist_array[:nbound] = node_list + 1
+
+    bound_array = get_bound_ptr(modelname, mf6, packagename)
+    bound_array[:nbound, 0] = elev[:]
+    bound_array[:nbound, 1] = np.full(
+        nbound,
+        get_boundary_conductance(),
+        dtype=float,
+    )
+
+    return
+
+
+def update_mf6(modelname, modelgrid, mf6, xy, water_level):
+    shape1d, _ = get_sizes()
+    top = mf6.get_value(mf6.get_var_address("TOP", modelname, "DIS"))[:shape1d]
+    water_level = dflowfm_to_array(modelgrid, xy, water_level)
+
+    _update_recharge(modelname, mf6, top, water_level)
+    _update_drain(modelname, mf6, top, water_level)
+    _update_ghb(modelname, mf6, top, water_level)
+    return
+
+
 def build_mf6(
     modelws,
     modelname="new_york",
     transient=False,
     strt=None,
-    npz=None,
+    xyz=None,
     clean=False,
     verbose=False,
 ):
@@ -65,7 +237,7 @@ def build_mf6(
     else:
         os.makedirs(modelws, exist_ok=True)
 
-    if npz is None:
+    if xyz is None:
         npz_path = os.path.abspath(os.path.join("model", "xyz.npz"))
         npzfile = np.load(npz_path)
         xyz = np.array(
@@ -77,9 +249,12 @@ def build_mf6(
         if verbose:
             print(xyz)
 
-    nlay, nrow, ncol = 2, 10, 11
-    shape2d, shape3d = (nrow, ncol), (nlay, nrow, ncol)
-    size2d, size3d = nrow * ncol, nlay * nrow * ncol
+    xy = xy_from_xyz(xyz)
+    z = z_from_xyz(xyz)
+
+    nlay, nrow, ncol = get_dimensions()
+    shape2d, shape3d = get_shapes()
+    size2d, size3d = get_sizes()
     delr, delc = np.full(ncol, dx, dtype=float), np.full(nrow, dy, dtype=float)
     xorigin, yorigin = -6.0, -5.0
 
@@ -110,13 +285,7 @@ def build_mf6(
         botm=botm_temp,
     )
 
-    map_dflow = []
-    top = np.zeros(shape2d, dtype=float)
-    for (x, y, z) in xyz:
-        i, j = structured_grid.intersect(x, y)
-        node = structured_grid.get_node([(0, i, j)])
-        top[i, j] = z
-        map_dflow.append((i, j, node[0]))
+    top = dflowfm_to_array(structured_grid, xy, z, two_dimensional=True)
 
     if strt is None:
         strt = np.zeros(shape3d, dtype=float)
@@ -125,25 +294,23 @@ def build_mf6(
         strt[strt < 0.0] = 0.0
 
     botm = np.zeros(shape3d, dtype=float)
-    dz0 = 5.0
-    dz_mf = dz0
+    dz_mf = get_layer0_thickness()
     botm[0, :, :] = top[:, :] - dz_mf
     for k in range(1, nlay):
         dz_mf *= 1.5
         botm[k, :, :] = botm[k - 1, :, :] - dz_mf
 
-    k = 1.0 / 86400.0
-    k33 = k / 10.0
+    k, k33 = get_hydraulic_conductivity()
     sy = 0.2
     ss = 1e-5
-    recharge = 2.0e-6
-    bed_thickness = 0.5 * dz0
-    ghb_cond = k33 * delr[0] * delc[0] / bed_thickness
+    recharge = get_recharge_rate()
+    ghb_cond = get_boundary_conductance()
 
     sim = flopy.mf6.MFSimulation(
         sim_name=modelname,
         sim_ws=modelws,
         exe_name=mfexe,
+        memory_print_option="ALL",
     )
     tdis = flopy.mf6.ModflowTdis(
         sim,
