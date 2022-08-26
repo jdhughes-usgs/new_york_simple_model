@@ -70,7 +70,7 @@ def dflowfm_to_array(modelgrid, xy, v, two_dimensional=False):
         shape, _ = get_shapes()
     else:
         shape, _ = get_sizes()
-    arr = np.zeros(shape, dtype=float)
+    arr = np.full(shape, 1e+30, dtype=float)
     for idx, (x, y) in enumerate(xy):
         i, j = modelgrid.intersect(x, y)
         if two_dimensional:
@@ -227,6 +227,7 @@ def build_mf6(
     strt=None,
     xyz=None,
     clean=False,
+    solver_print="SUMMARY",
     verbose=False,
 ):
 
@@ -261,7 +262,7 @@ def build_mf6(
     nper = 1
     if transient:
         sim_length = 86400.0
-        dt = 30.0
+        dt = 300.0
         nsteps = int(sim_length / dt)
         period_data = [
             (86400.0, nsteps, 1.0),
@@ -320,9 +321,9 @@ def build_mf6(
     ims = flopy.mf6.ModflowIms(
         sim,
         linear_acceleration="bicgstab",
-        print_option="all",
-        outer_dvclose=1e-9,
-        inner_dvclose=1e-10,
+        print_option=solver_print,
+        outer_dvclose=1e-6,
+        inner_dvclose=1e-9,
         outer_maximum=500,
         inner_maximum=100,
     )

@@ -4,6 +4,7 @@ from distutils.dir_util import copy_tree
 from bmi.wrapper import BMIWrapper
 import matplotlib.pyplot as plt
 import numpy as np
+import flopy
 from modflowapi import ModflowApi
 
 from new_york_build_dflow import build_dflowfm, extent, dx, dy
@@ -22,10 +23,13 @@ build_dflowfm(
 )
 
 # build mf6 model
+file_path = "model_ss/new_york.hds"
+strt = flopy.utils.HeadFile(file_path).get_data()
 sim = build_mf6(
     modelws,
     modelname=modelname,
     transient=True,
+    strt=strt,
     xyz=None,
     verbose=verbose,
 )
@@ -76,9 +80,17 @@ mf6.initialize(mf6_config_file)
 #     ax.set_ylim(-5.0, 5.0)
 # plt.show()
 
-# water_depth_levels = np.linspace(0.0, 5.0, 20)
-# water_level_levels = np.linspace(-5.0, 5.0, 20)
+water_depth_levels = np.linspace(0.0, 5.0, 20)
+water_level_levels = np.linspace(-5.0, 5.0, 20)
 
+print(
+    f"MF current_time: {mf6.get_current_time()}, "
+    + f"DFLOWFM current_time: {dflowfm.get_current_time()}"
+)
+print(
+    f"MF end_time: {mf6.get_end_time()}, "
+    + f"DFLOWFM end_time: {dflowfm.get_end_time()}"
+)
 
 # Time loop
 index = 0
@@ -89,7 +101,7 @@ while dflowfm.get_current_time() < dflowfm.get_end_time():
     update_mf6(modelname, gwf.modelgrid, mf6, xy, water_level)
     mf6.update()
 
-    # if index % 10 == 0:
+    # if index % 100 == 0:
     #     water_depth = dflowfm.get_var("hs")
     #     water_level = dflowfm.get_var("s1")
     #     sc = axs[0].tricontourf(x, y, water_depth, water_depth_levels)
@@ -97,7 +109,7 @@ while dflowfm.get_current_time() < dflowfm.get_end_time():
     #     if index == 0:
     #         plt.colorbar(sc, ax=axs[0])
     #         plt.colorbar(wl, ax=axs[1])
-    #     plt.title(str(index))
+    #     fig.suptitle(f"Simulation time {dflowfm.get_current_time()}")
     #     plt.pause(0.2)
 
     index += 1

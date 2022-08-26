@@ -113,6 +113,9 @@ def build_dflowfm(
     external_forcing = ExtModel(boundary=[boundary])
     fm_model.external_forcing.extforcefilenew = external_forcing
 
+    fm_model.time.dtuser = 300.
+    fm_model.output.mapinterval = [300.0]
+
     # Save model
     fm_model.save(recurse=True)
 
