@@ -374,9 +374,9 @@ def build_mf6(
         drn_value = -10.0
         ghb_value = 10.0
     else:
-        rch_value = 0.0
-        drn_value = 0.0
-        ghb_value = 0.0
+        rch_value = -0.79485651
+        drn_value = -0.79485651
+        ghb_value = -0.79485651
 
     rch = flopy.mf6.ModflowGwfrch(
         gwf,
