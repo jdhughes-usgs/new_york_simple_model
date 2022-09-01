@@ -6,8 +6,14 @@ channels:
 
 dependencies:
   - pip
+  - jupyter
+  - jupyterlab
   - pip:
       - matplotlib
       - bmi-python
       - pywin32
       - git+https://github.com/Deltares/HYDROLIB-core.git
+      - git+https://github.com/modflowpy/flopy.git
+      - git+https://github.com/Deltares/xmipy.git
+      - git+https://github.com/MODFLOW-USGS/modflowapi.git
+      - git+https://github.com/openearth/dfm_tools.git

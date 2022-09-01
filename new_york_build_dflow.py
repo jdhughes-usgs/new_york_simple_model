@@ -1,21 +1,22 @@
-from hydrolib.core.io.mdu.models import FMModel
-from hydrolib.core.io.xyz.models import XYZModel, XYZPoint
+import os
+import shutil
+from pathlib import Path
+
+import numpy as np
+from hydrolib.core.io.bc.models import (
+    Astronomic,
+    ForcingModel,
+    QuantityUnitPair,
+)
+from hydrolib.core.io.ext.models import Boundary, ExtModel
 from hydrolib.core.io.inifield.models import (
+    DataFileType,
     IniFieldModel,
     InitialField,
     InterpolationMethod,
-    DataFileType,
 )
-from hydrolib.core.io.bc.models import (
-    ForcingModel,
-    Astronomic,
-    QuantityUnitPair,
-)
-from hydrolib.core.io.ext.models import ExtModel, Boundary
-from pathlib import Path
-import os
-import shutil
-import numpy as np
+from hydrolib.core.io.mdu.models import FMModel
+from hydrolib.core.io.xyz.models import XYZModel, XYZPoint
 
 extent = (-5.0, -5.0, 5.0, 5.0)
 dx, dy = 1.0, 1.0
@@ -113,7 +114,7 @@ def build_dflowfm(
     external_forcing = ExtModel(boundary=[boundary])
     fm_model.external_forcing.extforcefilenew = external_forcing
 
-    fm_model.time.dtuser = 300.
+    fm_model.time.dtuser = 300.0
     fm_model.output.mapinterval = [300.0]
 
     # Save model

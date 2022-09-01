@@ -1,11 +1,12 @@
-from pathlib import Path
 import os
 from distutils.dir_util import copy_tree
-from bmi.wrapper import BMIWrapper
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
+from bmi.wrapper import BMIWrapper
 
-from new_york_build_dflow import build_dflowfm, extent, dx, dy
+from new_york_build_dflow import build_dflowfm, dx, dy, extent
 
 verbose = False
 modelname = "model"

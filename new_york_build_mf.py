@@ -1,9 +1,10 @@
 import os
-from pyexpat import model
 import shutil
-import numpy as np
-import flopy
 from pathlib import Path
+
+import flopy
+import numpy as np
+from pyexpat import model
 
 from new_york_build_dflow import dx, dy
 
@@ -50,7 +51,7 @@ def get_boundary_conductance():
 
 
 def get_recharge_rate():
-    return 2.0e-6
+    return 3.0e-6
 
 
 def xy_from_xyz(xyz):
@@ -70,7 +71,7 @@ def dflowfm_to_array(modelgrid, xy, v, two_dimensional=False):
         shape, _ = get_shapes()
     else:
         shape, _ = get_sizes()
-    arr = np.full(shape, 1e+30, dtype=float)
+    arr = np.full(shape, 1e30, dtype=float)
     for idx, (x, y) in enumerate(xy):
         i, j = modelgrid.intersect(x, y)
         if two_dimensional:
@@ -112,30 +113,41 @@ def ghb_boundary(nrow, ncol, top, cond, head=0.0):
     return stress_period_data
 
 
-def get_node_list(top, water_level, packagename):
-    nodes = top.shape[0]
-    node_list = []
-    elev = []
-    for node in range(nodes):
-        add_node = False
-        if "GHB" in packagename.upper():
-            if water_level[node] >= top[node]:
-                add_node = True
-        else:
-            if top[node] < water_level[node]:
-                add_node = True
-        if add_node:
-            node_list.append(node)
-            elev.append(water_level[node])
-    node_list = np.array(node_list, dtype=np.int32) + 1
-    elev = np.array(elev, dtype=float)
-    nbound = np.int32(node_list.shape[0])
-    return nbound, node_list, elev
-
-
 def update_nbound(modelname, mf6, packagename, nbound):
     nbound_tag = mf6.get_var_address("NBOUND", modelname.upper(), packagename)
     mf6.set_value(nbound_tag, np.array([nbound], dtype=np.int32))
+
+
+def get_node_list(
+    modelname,
+    mf6,
+    packagename,
+    top,
+    water_level,
+    water_depth,
+):
+    node_list = []
+    elev = []
+    for node, (wl, wd, tp) in enumerate(zip(water_level, water_depth, top)):
+        if wd > 0.0:
+            dry = False
+        else:
+            dry = True
+        add_node = False
+        if "GHB" in packagename.upper():
+            if not dry:
+                add_node = True
+        else:
+            if dry:
+                add_node = True
+        if add_node:
+            node_list.append(node)
+            elev.append(wl)
+    node_list = np.array(node_list, dtype=np.int32)
+    elev = np.array(elev, dtype=float)
+    nbound = np.int32(node_list.shape[0])
+    update_nbound(modelname, mf6, packagename, nbound)
+    return nbound, node_list, elev
 
 
 def get_nodelist_ptr(modelname, mf6, packagename):
@@ -150,14 +162,25 @@ def get_bound_ptr(modelname, mf6, packagename):
     return mf6.get_value_ptr(bound_tag)
 
 
-def _update_recharge(modelname, mf6, top, water_level):
+def _update_recharge(
+    modelname,
+    mf6,
+    top,
+    water_level,
+    water_depth,
+):
     packagename = "RCH_0"
-    nbound, node_list, _ = get_node_list(top, water_level, packagename)
-
-    update_nbound(modelname, mf6, packagename, nbound)
+    nbound, node_list, _ = get_node_list(
+        modelname,
+        mf6,
+        packagename,
+        top,
+        water_level,
+        water_depth,
+    )
 
     nodelist_array = get_nodelist_ptr(modelname, mf6, packagename)
-    nodelist_array[:nbound] = node_list
+    nodelist_array[:nbound] = node_list + 1
 
     bound_array = get_bound_ptr(modelname, mf6, packagename)
     bound_array[:nbound, 0] = np.full(
@@ -169,11 +192,22 @@ def _update_recharge(modelname, mf6, top, water_level):
     return
 
 
-def _update_drain(modelname, mf6, top, water_level):
+def _update_drain(
+    modelname,
+    mf6,
+    top,
+    water_level,
+    water_depth,
+):
     packagename = "DRN_0"
-    nbound, node_list, elev = get_node_list(top, water_level, packagename)
-
-    update_nbound(modelname, mf6, packagename, nbound)
+    nbound, node_list, elev = get_node_list(
+        modelname,
+        mf6,
+        packagename,
+        top,
+        water_level,
+        water_depth,
+    )
 
     nodelist_array = get_nodelist_ptr(modelname, mf6, packagename)
     nodelist_array[:nbound] = node_list + 1
@@ -189,11 +223,22 @@ def _update_drain(modelname, mf6, top, water_level):
     return
 
 
-def _update_ghb(modelname, mf6, top, water_level):
+def _update_ghb(
+    modelname,
+    mf6,
+    top,
+    water_level,
+    water_depth,
+):
     packagename = "GHB_0"
-    nbound, node_list, elev = get_node_list(top, water_level, packagename)
-
-    update_nbound(modelname, mf6, packagename, nbound)
+    nbound, node_list, elev = get_node_list(
+        modelname,
+        mf6,
+        packagename,
+        top,
+        water_level,
+        water_depth,
+    )
 
     nodelist_array = get_nodelist_ptr(modelname, mf6, packagename)
     nodelist_array[:nbound] = node_list + 1
@@ -209,15 +254,70 @@ def _update_ghb(modelname, mf6, top, water_level):
     return
 
 
-def update_mf6(modelname, modelgrid, mf6, xy, water_level):
+def update_mf6(modelname, modelgrid, mf6, xy, water_level, water_depth):
     shape1d, _ = get_sizes()
     top = mf6.get_value(mf6.get_var_address("TOP", modelname, "DIS"))[:shape1d]
     water_level = dflowfm_to_array(modelgrid, xy, water_level)
+    water_depth = dflowfm_to_array(modelgrid, xy, water_depth)
 
-    _update_recharge(modelname, mf6, top, water_level)
-    _update_drain(modelname, mf6, top, water_level)
-    _update_ghb(modelname, mf6, top, water_level)
+    _update_recharge(
+        modelname,
+        mf6,
+        top,
+        water_level,
+        water_depth,
+    )
+    _update_drain(
+        modelname,
+        mf6,
+        top,
+        water_level,
+        water_depth,
+    )
+    _update_ghb(
+        modelname,
+        mf6,
+        top,
+        water_level,
+        water_depth,
+    )
     return
+
+
+def get_mf6_bcq(
+    modelname,
+    mf6,
+    drn_packagename="DRN_0",
+    ghb_packagename="GHB_0",
+):
+    """Return drain and ghb volumetric flow rate as
+    two dimensional arrays
+
+    """
+    _, nrow, ncol = get_dimensions()
+    shape2d = (ncol, nrow)
+    drn_q = np.full(ncol * nrow, 1e30, dtype=float)
+    ghb_q = np.full(ncol * nrow, 1e30, dtype=float)
+
+    nbound = mf6.get_value(
+        mf6.get_var_address("NBOUND", modelname, drn_packagename)
+    )[0]
+    node_list = get_nodelist_ptr(modelname, mf6, drn_packagename)[:nbound]
+    q = mf6.get_value(
+        mf6.get_var_address("SIMVALS", modelname, drn_packagename)
+    )[:nbound]
+    drn_q[node_list - 1] = q[:]
+
+    nbound = mf6.get_value(
+        mf6.get_var_address("NBOUND", modelname, ghb_packagename)
+    )[0]
+    node_list = get_nodelist_ptr(modelname, mf6, ghb_packagename)[:nbound]
+    q = mf6.get_value(
+        mf6.get_var_address("SIMVALS", modelname, ghb_packagename)
+    )[:nbound]
+    ghb_q[node_list - 1] = q[:]
+
+    return drn_q.reshape(shape2d), ghb_q.reshape(shape2d)
 
 
 def build_mf6(
@@ -369,18 +469,21 @@ def build_mf6(
             transient={0: True},
         )
 
+    rch_value = -0.79485651
+    drn_value = -0.79485651
+    ghb_value = -0.79485651
     if transient:
-        rch_value = -10.0
-        drn_value = -10.0
-        ghb_value = 10.0
+        rch_maxbound = size2d
+        drn_maxbound = size2d
+        ghb_maxbound = size2d
     else:
-        rch_value = -0.79485651
-        drn_value = -0.79485651
-        ghb_value = -0.79485651
+        rch_maxbound = None
+        drn_maxbound = None
+        ghb_maxbound = None
 
     rch = flopy.mf6.ModflowGwfrch(
         gwf,
-        maxbound=size2d,
+        maxbound=rch_maxbound,
         stress_period_data=rch_boundary(
             nrow,
             ncol,
@@ -394,7 +497,7 @@ def build_mf6(
         gwf,
         auxiliary=["depth"],
         auxdepthname="depth",
-        maxbound=size2d,
+        maxbound=drn_maxbound,
         stress_period_data=drn_boundary(
             nrow,
             ncol,
@@ -406,7 +509,7 @@ def build_mf6(
 
     ghb = flopy.mf6.ModflowGwfghb(
         gwf,
-        maxbound=size2d,
+        maxbound=ghb_maxbound,
         stress_period_data=ghb_boundary(
             nrow,
             ncol,

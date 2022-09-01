@@ -1,14 +1,15 @@
-from pathlib import Path
 import os
 from distutils.dir_util import copy_tree
-from bmi.wrapper import BMIWrapper
+from pathlib import Path
+
+import flopy
 import matplotlib.pyplot as plt
 import numpy as np
-import flopy
+from bmi.wrapper import BMIWrapper
 from modflowapi import ModflowApi
 
-from new_york_build_dflow import build_dflowfm, extent, dx, dy
-from new_york_build_mf import build_mf6, mfapiexe, update_mf6
+from new_york_build_dflow import build_dflowfm, dx, dy, extent
+from new_york_build_mf import build_mf6, get_mf6_bcq, mfapiexe, update_mf6
 
 verbose = False
 
@@ -23,7 +24,7 @@ build_dflowfm(
 )
 
 # build mf6 model
-file_path = "model_ss/new_york.hds"
+file_path = "data/new_york.hds"
 strt = flopy.utils.HeadFile(file_path).get_data()
 sim = build_mf6(
     modelws,
@@ -68,21 +69,6 @@ mf6 = ModflowApi(mfapiexe)
 mf6.initialize(mf6_config_file)
 
 
-# # initialize figure and figure data
-# plt.ion()
-# fig, axs = plt.subplots(nrows=1, ncols=2, sharey=True)
-# fig.set_figheight(6)
-# fig.set_figwidth(12)
-# axs = axs.flatten()
-# for ax in axs:
-#     ax.set_aspect("equal", "box")
-#     ax.set_xlim(-6.0, 5.0)
-#     ax.set_ylim(-5.0, 5.0)
-# plt.show()
-
-water_depth_levels = np.linspace(0.0, 5.0, 20)
-water_level_levels = np.linspace(-5.0, 5.0, 20)
-
 print(
     f"MF current_time: {mf6.get_current_time()}, "
     + f"DFLOWFM current_time: {dflowfm.get_current_time()}"
@@ -93,27 +79,34 @@ print(
 )
 
 # Time loop
-index = 0
 while dflowfm.get_current_time() < dflowfm.get_end_time():
     dflowfm.update()
 
     water_level = dflowfm.get_var("s1")
-    update_mf6(modelname, gwf.modelgrid, mf6, xy, water_level)
+    water_depth = dflowfm.get_var("hs")
+    update_mf6(
+        modelname,
+        gwf.modelgrid,
+        mf6,
+        xy,
+        water_level,
+        water_depth,
+    )
     mf6.update()
 
-    # if index % 100 == 0:
-    #     water_depth = dflowfm.get_var("hs")
-    #     water_level = dflowfm.get_var("s1")
-    #     sc = axs[0].tricontourf(x, y, water_depth, water_depth_levels)
-    #     wl = axs[1].tricontourf(x, y, water_depth, water_level_levels)
-    #     if index == 0:
-    #         plt.colorbar(sc, ax=axs[0])
-    #         plt.colorbar(wl, ax=axs[1])
-    #     fig.suptitle(f"Simulation time {dflowfm.get_current_time()}")
-    #     plt.pause(0.2)
-
-    index += 1
+    # get the volumetric drain and ghb fluxes
+    # these could be provided as a source or sink
+    # of water for D-FLOW FM. A negative value
+    # would be a source of water to D-FLOW FM.
+    # A positive value would be a loss of water
+    # from D-FLOW FM. Drain volumetric fluxes will
+    # always be a source of water to D-FLOW FM.
+    drn_q, ghb_q = get_mf6_bcq(modelname, mf6)
 
 # Finalize
 dflowfm.finalize()
 mf6.finalize()
+
+# to print the final drn_q and ghb_q array data
+# print(len(drn_q[drn_q != 1e30]), drn_q.shape, drn_q)
+# print(len(ghb_q[ghb_q != 1e30]), ghb_q.shape, ghb_q)
